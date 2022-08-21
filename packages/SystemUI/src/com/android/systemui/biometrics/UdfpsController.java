@@ -19,6 +19,8 @@ package com.android.systemui.biometrics;
 import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_GOOD;
 import static android.hardware.biometrics.BiometricOverlayConstants.REASON_AUTH_KEYGUARD;
 
+import static android.hardware.biometrics.BiometricFingerprintConstants.FINGERPRINT_ACQUIRED_VENDOR;
+
 import static com.android.internal.util.Preconditions.checkNotNull;
 import static com.android.systemui.classifier.Classifier.UDFPS_AUTHENTICATION;
 
@@ -165,6 +167,7 @@ public class UdfpsController implements DozeReceiver {
     private boolean mOnFingerDown;
     private boolean mAttemptedToDismissKeyguard;
     private final Set<Callback> mCallbacks = new HashSet<>();
+    private final int mUdfpsVendorCode;
 
     @VisibleForTesting
     public static final VibrationAttributes VIBRATION_ATTRIBUTES =
@@ -227,7 +230,7 @@ public class UdfpsController implements DozeReceiver {
         @Override
         public void onAcquired(
                 int sensorId,
-                @BiometricFingerprintConstants.FingerprintAcquired int acquiredInfo
+                @BiometricFingerprintConstants.FingerprintAcquired int acquiredInfo, int vendorCode
         ) {
             if (BiometricFingerprintConstants.shouldTurnOffHbm(acquiredInfo)) {
                 boolean acquiredGood = acquiredInfo == FINGERPRINT_ACQUIRED_GOOD;
@@ -246,6 +249,16 @@ public class UdfpsController implements DozeReceiver {
                         mOverlay.onAcquiredGood();
                     }
                 });
+            } else {
+                boolean acquiredVendor = acquiredInfo == FINGERPRINT_ACQUIRED_VENDOR;
+                if (!acquiredVendor || (!mStatusBarStateController.isDozing() && mScreenOn)) {
+                    return;
+                }
+                if (vendorCode == mUdfpsVendorCode) {
+                    mPowerManager.wakeUp(mSystemClock.uptimeMillis(),
+                            PowerManager.WAKE_REASON_GESTURE, TAG);
+                    onAodInterrupt(0, 0, 0, 0);
+                }
             }
         }
 
@@ -444,7 +457,12 @@ public class UdfpsController implements DozeReceiver {
                     // We need to persist its ID to track it during ACTION_MOVE that could include
                     // data for many other pointers because of multi-touch support.
                     mActivePointerId = event.getPointerId(0);
+                    final int idx = mActivePointerId == -1
+                            ? event.getPointerId(0)
+                            : event.findPointerIndex(mActivePointerId);
                     mVelocityTracker.addMovement(event);
+                    onFingerDown(requestId, (int) event.getRawX(), (int) event.getRawY(),
+                            (int) event.getTouchMinor(idx), (int) event.getTouchMajor(idx));
                     handled = true;
                     mAcquiredReceived = false;
                 }
@@ -593,7 +611,7 @@ public class UdfpsController implements DozeReceiver {
             @NonNull VibratorHelper vibrator,
             @NonNull UdfpsHapticsSimulator udfpsHapticsSimulator,
             @NonNull UdfpsShell udfpsShell,
-            @NonNull Optional<UdfpsHbmProvider> hbmProvider,
+            @NonNull UdfpsHbmProvider hbmProvider,
             @NonNull KeyguardStateController keyguardStateController,
             @NonNull DisplayManager displayManager,
             @Main Handler mainHandler,
@@ -625,7 +643,7 @@ public class UdfpsController implements DozeReceiver {
         mPowerManager = powerManager;
         mAccessibilityManager = accessibilityManager;
         mLockscreenShadeTransitionController = lockscreenShadeTransitionController;
-        mHbmProvider = hbmProvider.orElse(null);
+        mHbmProvider = hbmProvider;
         screenLifecycle.addObserver(mScreenObserver);
         mScreenOn = screenLifecycle.getScreenState() == ScreenLifecycle.SCREEN_ON;
         mConfigurationController = configurationController;
@@ -658,6 +676,8 @@ public class UdfpsController implements DozeReceiver {
 
         udfpsHapticsSimulator.setUdfpsController(this);
         udfpsShell.setUdfpsOverlayController(mUdfpsOverlayController);
+
+        mUdfpsVendorCode = mContext.getResources().getInteger(R.integer.config_udfps_vendor_code);
     }
 
     /**
