@@ -1977,6 +1977,9 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
         if (mProximitySensor != null) {
             mProximityThreshold = Math.min(mProximitySensor.getMaximumRange(),
                     TYPICAL_PROXIMITY_THRESHOLD);
+            if (Float.isNaN(mProximityThreshold)) {
+                mProximityThreshold = 5.0f;
+            }
         }
     }
 
@@ -2348,7 +2351,7 @@ final class DisplayPowerController implements AutomaticBrightnessController.Call
     }
 
     private void putAutoBrightnessAdjustmentSetting(float adjustment) {
-        if (mDisplayId == Display.DEFAULT_DISPLAY) {
+        if (mDisplayId == Display.DEFAULT_DISPLAY && !Float.isNaN(adjustment)) {
             mAutoBrightnessAdjustment = adjustment;
             Settings.System.putFloatForUser(mContext.getContentResolver(),
                     Settings.System.SCREEN_AUTO_BRIGHTNESS_ADJ, adjustment,

@@ -20,11 +20,15 @@ import static com.android.settingslib.mobile.MobileMappings.getIconKey;
 import static com.android.settingslib.mobile.MobileMappings.mapIconSets;
 
 import android.content.Context;
+import android.content.ContentResolver;
 import android.content.Intent;
 import android.database.ContentObserver;
 import android.net.NetworkCapabilities;
+import android.net.Uri;
 import android.os.Handler;
+import android.os.UserHandle;
 import android.os.Looper;
+import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.telephony.AccessNetworkConstants;
 import android.telephony.CellSignalStrength;
@@ -179,6 +183,10 @@ public class MobileSignalController extends SignalController<MobileState, Mobile
         }
     };
 
+    private boolean mRoamingIconAllowed;
+
+    private boolean mDataDisabledIcon;
+
     // TODO: Reduce number of vars passed in, if we have the NetworkController, probably don't
     // need listener lists anymore.
     public MobileSignalController(
@@ -227,6 +235,50 @@ public class MobileSignalController extends SignalController<MobileState, Mobile
         mMobileStatusTracker = new MobileStatusTracker(mPhone, receiverLooper,
                 info, mDefaults, mMobileCallback);
         mProviderModelBehavior = featureFlags.isEnabled(Flags.COMBINED_STATUS_BAR_SIGNAL_ICONS);
+
+	    Handler mHandler = new Handler();
+        SettingsObserver settingsObserver = new SettingsObserver(mHandler);
+        settingsObserver.observe();
+    }
+
+    class SettingsObserver extends ContentObserver {
+        SettingsObserver(Handler handler) {
+            super(handler);
+        }
+        void observe() {
+            ContentResolver resolver = mContext.getContentResolver();
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.SHOW_FOURG_ICON), false,
+                    this, UserHandle.USER_ALL);
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.ROAMING_INDICATOR_ICON), false,
+                    this, UserHandle.USER_ALL);
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.DATA_DISABLED_ICON), false,
+                    this, UserHandle.USER_ALL);
+            updateSettings();
+        }
+
+        /*
+         *  @hide
+         */
+        @Override
+        public void onChange(boolean selfChange) {
+            updateSettings();
+        }
+    }
+
+    private void updateSettings() {
+        ContentResolver resolver = mContext.getContentResolver();
+        mRoamingIconAllowed = Settings.System.getIntForUser(resolver,
+                Settings.System.ROAMING_INDICATOR_ICON, 1,
+                UserHandle.USER_CURRENT) == 1;
+        mDataDisabledIcon = Settings.System.getIntForUser(resolver,
+                Settings.System.DATA_DISABLED_ICON, 1,
+                UserHandle.USER_CURRENT) == 1;
+        mConfig = Config.readConfig(mContext);
+        setConfiguration(mConfig);
+        notifyListeners();
     }
 
     void setConfiguration(Config config) {
@@ -384,7 +436,8 @@ public class MobileSignalController extends SignalController<MobileState, Mobile
                 qsInfo.description,
                 mSubscriptionInfo.getSubscriptionId(),
                 mCurrentState.roaming,
-                sbInfo.showTriangle);
+                sbInfo.showTriangle,
+                mCurrentState.isDefault);
         callback.setMobileDataIndicators(mobileDataIndicators);
     }
 
@@ -394,8 +447,7 @@ public class MobileSignalController extends SignalController<MobileState, Mobile
         CharSequence qsDescription = null;
 
         if (mCurrentState.dataSim) {
-            // If using provider model behavior, only show QS icons if the state is also default
-            if (!mCurrentState.isDefault) {
+            if (mProviderModelBehavior) {
                 return new QsInfo(qsTypeIcon, qsIcon, qsDescription);
             }
 
@@ -737,10 +789,10 @@ public class MobileSignalController extends SignalController<MobileState, Mobile
         }
         mCurrentState.dataConnected = mCurrentState.isDataConnected();
 
-        mCurrentState.roaming = isRoaming();
+        mCurrentState.roaming = isRoaming() && mRoamingIconAllowed;
         if (isCarrierNetworkChangeActive()) {
             mCurrentState.iconGroup = TelephonyIcons.CARRIER_NETWORK_CHANGE;
-        } else if (isDataDisabled() && !mConfig.alwaysShowDataRatIcon) {
+        } else if (isDataDisabled() && mDataDisabledIcon/*!mConfig.alwaysShowDataRatIcon*/) {
             if (mSubscriptionInfo.getSubscriptionId() != mDefaults.getDefaultDataSubId()) {
                 mCurrentState.iconGroup = TelephonyIcons.NOT_DEFAULT_DATA;
             } else {

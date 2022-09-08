@@ -97,6 +97,7 @@ import com.android.internal.policy.IKeyguardExitCallback;
 import com.android.internal.policy.IKeyguardStateCallback;
 import com.android.internal.policy.ScreenDecorationsUtils;
 import com.android.internal.util.LatencyTracker;
+import com.android.internal.util.xd.udfps.UdfpsUtils;
 import com.android.internal.widget.LockPatternUtils;
 import com.android.keyguard.KeyguardConstants;
 import com.android.keyguard.KeyguardDisplayManager;
@@ -389,6 +390,7 @@ public class KeyguardViewMediator extends CoreStartable implements Dumpable,
     private boolean mHideAnimationRun = false;
     private boolean mHideAnimationRunning = false;
 
+    private long mLastTimeSoundWasPlayed = 0;
     private SoundPool mLockSounds;
     private int mLockSoundId;
     private int mUnlockSoundId;
@@ -1256,7 +1258,10 @@ public class KeyguardViewMediator extends CoreStartable implements Dumpable,
         // explicitly DO NOT want to call
         // mKeyguardViewControllerLazy.get().setKeyguardGoingAwayState(false)
         // here, since that will mess with the device lock state.
-        mUpdateMonitor.dispatchKeyguardGoingAway(false);
+        boolean isUdfps = deviceHasUdfps();
+        if (!isUdfps) {
+            mUpdateMonitor.dispatchKeyguardGoingAway(false);
+        }
 
         notifyStartedGoingToSleep();
     }
@@ -1816,6 +1821,8 @@ public class KeyguardViewMediator extends CoreStartable implements Dumpable,
             if (mLockPatternUtils.isLockScreenDisabled(KeyguardUpdateMonitor.getCurrentUser())
                     && !lockedOrMissing && !forceShow) {
                 if (DEBUG) Log.d(TAG, "doKeyguard: not showing because lockscreen is off");
+                setShowingLocked(false, mAodShowing);
+                hideLocked();
                 return;
             }
         }
@@ -2234,6 +2241,8 @@ public class KeyguardViewMediator extends CoreStartable implements Dumpable,
         if (soundId == 0) return;
         final ContentResolver cr = mContext.getContentResolver();
         if (Settings.System.getInt(cr, Settings.System.LOCKSCREEN_SOUNDS_ENABLED, 1) == 1) {
+            if (SystemClock.elapsedRealtime() - mLastTimeSoundWasPlayed < 300) return;
+            mLastTimeSoundWasPlayed = SystemClock.elapsedRealtime();
 
             mLockSounds.stop(mLockSoundStreamId);
             // Init mAudioManager
@@ -3203,5 +3212,9 @@ public class KeyguardViewMediator extends CoreStartable implements Dumpable,
             setOccluded(isKeyguardOccluded /* occluded */, false /* animate */);
 
         }
+    }
+
+    private boolean deviceHasUdfps() {
+        return UdfpsUtils.hasUdfpsSupport(mContext);
     }
 }

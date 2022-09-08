@@ -17,6 +17,7 @@
 package com.android.systemui.statusbar.phone;
 
 import static android.app.admin.DevicePolicyResources.Strings.SystemUi.STATUS_BAR_WORK_ICON_ACCESSIBILITY;
+import static android.bluetooth.BluetoothDevice.BATTERY_LEVEL_UNKNOWN;
 
 import android.annotation.Nullable;
 import android.app.ActivityTaskManager;
@@ -25,6 +26,7 @@ import android.app.AlarmManager.AlarmClockInfo;
 import android.app.IActivityManager;
 import android.app.SynchronousUserSwitchObserver;
 import android.app.admin.DevicePolicyManager;
+import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -46,6 +48,7 @@ import android.view.View;
 
 import androidx.lifecycle.Observer;
 
+import com.android.settingslib.bluetooth.CachedBluetoothDevice;
 import com.android.systemui.R;
 import com.android.systemui.broadcast.BroadcastDispatcher;
 import com.android.systemui.dagger.qualifiers.DisplayId;
@@ -249,6 +252,7 @@ public class PhoneStatusBarPolicy
 
         filter.addAction(AudioManager.ACTION_HEADSET_PLUG);
         filter.addAction(Intent.ACTION_SIM_STATE_CHANGED);
+        filter.addAction(BluetoothDevice.ACTION_BATTERY_LEVEL_CHANGED);
         filter.addAction(TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED);
         filter.addAction(Intent.ACTION_MANAGED_PROFILE_AVAILABLE);
         filter.addAction(Intent.ACTION_MANAGED_PROFILE_UNAVAILABLE);
@@ -384,7 +388,7 @@ public class PhoneStatusBarPolicy
         final boolean zenNone = zen == Global.ZEN_MODE_NO_INTERRUPTIONS;
         mIconController.setIcon(mSlotAlarmClock, zenNone ? R.drawable.stat_sys_alarm_dim
                 : R.drawable.stat_sys_alarm, buildAlarmContentDescription());
-        mIconController.setIconVisibility(mSlotAlarmClock, mCurrentUserSetup && hasAlarm);
+        mIconController.setIconVisibility(mSlotAlarmClock, hasAlarm);
     }
 
     private String buildAlarmContentDescription() {
@@ -494,6 +498,34 @@ public class PhoneStatusBarPolicy
             if (mBluetooth.isBluetoothConnected()
                     && (mBluetooth.isBluetoothAudioActive()
                     || !mBluetooth.isBluetoothAudioProfileOnly())) {
+                List<CachedBluetoothDevice> connectedDevices = mBluetooth.getConnectedDevices();
+                int batteryLevel = connectedDevices.isEmpty() ? BATTERY_LEVEL_UNKNOWN
+                        : connectedDevices.stream()
+                                          .mapToInt(device -> device.getBatteryLevel())
+                                          .filter(level -> level != BATTERY_LEVEL_UNKNOWN)
+                                          .findFirst()
+                                          .orElse(BATTERY_LEVEL_UNKNOWN);
+                if (batteryLevel == 100) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_9;
+                } else if (batteryLevel >= 90) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_8;
+                } else if (batteryLevel >= 80) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_7;
+                } else if (batteryLevel >= 70) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_6;
+                } else if (batteryLevel >= 60) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_5;
+                } else if (batteryLevel >= 50) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_4;
+                } else if (batteryLevel >= 40) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_3;
+                } else if (batteryLevel >= 30) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_2;
+                } else if (batteryLevel >= 20) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_1;
+                } else if (batteryLevel >= 10) {
+                    iconId = R.drawable.stat_sys_data_bluetooth_connected_battery_0;
+                }
                 contentDescription = mResources.getString(
                         R.string.accessibility_bluetooth_connected);
                 bluetoothVisible = mBluetooth.isBluetoothEnabled();
@@ -776,7 +808,9 @@ public class PhoneStatusBarPolicy
                 case NfcAdapter.ACTION_ADAPTER_STATE_CHANGED:
                     updateNfc();
                     break;
-
+                case BluetoothDevice.ACTION_BATTERY_LEVEL_CHANGED:
+                    updateBluetooth();
+                    break;
             }
         }
     };
